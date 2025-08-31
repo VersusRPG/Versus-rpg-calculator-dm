@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Versus RPG Damage Calculator — Column (8 Trackers)</title>
+<style>
+  /* Simple, robust, one-column layout */
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    margin: 1rem auto;
+    padding: 0 1rem;
+    max-width: 520px;
+    background: #fff;
+    color: #111;
+  }
+  h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+
+  .tracker {
+    border: 1px solid #e5e5e5;
+    border-radius: .6rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    background: #fff;
+  }
+
+  /* Labels stack their input; everything is full-width */
+  label {
+    display: block;
+    font-size: .9rem;
+    margin: .6rem 0 .35rem;
+  }
+  input[type="number"], input[type="text"] {
+    width: 100%;
+    padding: .6rem .7rem;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: .6rem;
+  }
+
+  .opts { display:flex; flex-direction:column; gap:.35rem; margin-top:.5rem; }
+  .opt { display:flex; gap:.5rem; align-items:center; }
+  .muted { color:#666; font-size:.9rem; }
+
+  .btns { display:flex; gap:.5rem; margin: .75rem 0; flex-wrap: wrap; }
+  button { padding:.6rem .9rem; font-size:1rem; border:1px solid #ccc; border-radius:.6rem; cursor:pointer; background:#f6f6f6; }
+  button.primary { background:#eaeaea; font-weight:600; }
+
+  .result { padding:.75rem; background:#fafafa; border:1px solid #eee; border-radius:.6rem; font-size:.95rem; min-height:2.25rem; }
+</style>
+</head>
+<body>
+  <h1>Versus RPG Damage Calculator (8 Trackers, Column)</h1>
+
+  <div id="trackers"></div>
+
+<script>
+(function () {
+  const COUNT = 8;
+
+  function trackerTemplate(index) {
+    const n = index + 1;
+    return `
+      <label>Name (just a label, not used in math)
+        <input data-role="name" type="text" placeholder="Creature ${n}" />
+      </label>
+
+      <label>Current HP
+        <input data-role="hp" type="number" inputmode="numeric" min="0" step="1" value="0" />
+      </label>
+
+      <label>Damage Reduction (DR)
+        <input data-role="dr" type="number" inputmode="numeric" min="0" step="1" value="0" />
+      </label>
+
+      <label>Incoming Damage
+        <input data-role="dmg" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g., 17" />
+      </label>
+
+      <label>Options</label>
+      <div class="opts">
+        <label class="opt">
+          <input data-role="resist" type="checkbox" />
+          <span class="muted">Resistant</span>
+        </label>
+        <label class="opt">
+          <input data-role="vulnerable" type="checkbox" />
+          <span class="muted">Vulnerable</span>
+        </label>
+        <label class="opt">
+          <input data-role="ap" type="checkbox" />
+          <span class="muted">Armor Piercing</span>
+        </label>
+        <label class="opt">
+          <input data-role="noNegative" type="checkbox" checked />
+          <span class="muted">Don’t drop below 0 HP</span>
+        </label>
+        <label class="opt">
+          <input data-role="autoClear" type="checkbox" checked />
+          <span class="muted">Clear Damage after apply</span>
+        </label>
+      </div>
+
+      <div class="btns">
+        <button class="primary" data-role="applyBtn">Apply Damage (Enter)</button>
+        <button data-role="healBtn" title="Add healing to HP">Heal</button>
+        <button data-role="resetBtn" title="Reset HP to a value and clear damage">Reset</button>
+      </div>
+
+      <div data-role="result" class="result">Result will appear here.</div>
+    `;
+  }
+
+  function toInt(v, fallback = 0) {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function clampMin0(n) { return n < 0 ? 0 : n; }
+
+  function makeTracker(container, idx) {
+    container.classList.add('tracker');
+    container.innerHTML = trackerTemplate(idx);
+
+    const q = sel => container.querySelector(sel);
+    const nameEl = q('[data-role="name"]');
+    const hpEl = q('[data-role="hp"]');
+    const drEl = q('[data-role="dr"]');
+    const dmgEl = q('[data-role="dmg"]');
+    const resistEl = q('[data-role="resist"]');
+    const vulnEl = q('[data-role="vulnerable"]');
+    const apEl = q('[data-role="ap"]');
+    const noNegativeEl = q('[data-role="noNegative"]');
+    const autoClearEl = q('[data-role="autoClear"]');
+    const resultEl = q('[data-role="result"]');
+    const applyBtn = q('[data-role="applyBtn"]');
+    const healBtn = q('[data-role="healBtn"]');
+    const resetBtn = q('[data-role="resetBtn"]');
+
+    const LS_KEY = `versusDRCalc_col_${idx}`;
+
+    function load() {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+      if (typeof saved.name === 'string') nameEl.value = saved.name;
+      if (typeof saved.hp === 'number') hpEl.value = saved.hp;
+      if (typeof saved.dr === 'number') drEl.value = saved.dr;
+      if (typeof saved.resist === 'boolean') resistEl.checked = saved.resist;
+      if (typeof saved.vuln === 'boolean') vulnEl.checked = saved.vuln;
+      if (typeof saved.ap === 'boolean') apEl.checked = saved.ap;
+      if (typeof saved.noNegative === 'boolean') noNegativeEl.checked = saved.noNegative;
+      if (typeof saved.autoClear === 'boolean') autoClearEl.checked = saved.autoClear;
+    }
+    function save() {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        name: nameEl.value || '',
+        hp: toInt(hpEl.value, 0),
+        dr: toInt(drEl.value, 0),
+        resist: !!resistEl.checked,
+        vuln: !!vulnEl.checked,
+        ap: !!apEl.checked,
+        noNegative: !!noNegativeEl.checked,
+        autoClear: !!autoClearEl.checked
+      }));
+    }
+
+    // Mutually exclusive toggles
+    resistEl.addEventListener('change', () => { if (resistEl.checked) vulnEl.checked = false; save(); });
+    vulnEl.addEventListener('change', () => { if (vulnEl.checked) resistEl.checked = false; save(); });
+
+    // Save on changes
+    [nameEl, hpEl, drEl, apEl, noNegativeEl, autoClearEl].forEach(el =>
+      el.addEventListener('input', save)
+    );
+    [resistEl, vulnEl, apEl, noNegativeEl, autoClearEl].forEach(el =>
+      el.addEventListener('change', save)
+    );
+
+    function applyDamage() {
+      let hp = toInt(hpEl.value, 0);
+      let dr = clampMin0(toInt(drEl.value, 0));
+      const dmg = clampMin0(toInt(dmgEl.value, 0));
+      if (apEl.checked) dr = 0;
+
+      const afterDR = Math.max(0, dmg - dr);
+      let modified = afterDR;
+      if (resistEl.checked) modified = Math.floor(modified / 2);
+      if (vulnEl.checked)   modified = modified * 2;
+
+      let newHP = hp - modified;
+      if (noNegativeEl.checked) newHP = Math.max(0, newHP);
+
+      hpEl.value = newHP;
+
+      const steps = [`${nameEl.value ? nameEl.value + ': ' : ''}Damage ${dmg}`];
+      if (apEl.checked) steps.push(`Armor Piercing → ignores DR`);
+      else steps.push(`after DR ${dr} = ${afterDR}`);
+      if (resistEl.checked) steps.push(`resist → ${Math.floor(afterDR / 2)}`);
+      if (vulnEl.checked) steps.push(`vulnerable → ${resistEl.checked ? Math.floor(afterDR / 2) * 2 : afterDR * 2}`);
+
+      resultEl.textContent = `${steps.join(' → ')}. New HP: ${newHP}.`;
+
+      if (autoClearEl.checked) dmgEl.value = '';
+      save();
+      dmgEl.focus();
+    }
+
+    function heal() {
+      const amt = toInt(prompt('Healing amount:'), 0);
+      if (!Number.isFinite(amt)) return;
+      const healAmt = Math.max(0, amt);
+      const newHP = toInt(hpEl.value, 0) + healAmt;
+      hpEl.value = newHP;
+      resultEl.textContent = `${nameEl.value ? nameEl.value + ': ' : ''}Healed ${healAmt}. New HP: ${newHP}.`;
+      save();
+    }
+
+    function resetAll() {
+      const setTo = toInt(prompt('Set HP to:'), 0);
+      if (!Number.isFinite(setTo)) return;
+      hpEl.value = Math.max(0, setTo);
+      dmgEl.value = '';
+      resultEl.textContent = `${nameEl.value ? nameEl.value + ': ' : ''}HP reset to ${hpEl.value}.`;
+      save();
+      dmgEl.focus();
+    }
+
+    applyBtn.addEventListener('click', applyDamage);
+    healBtn.addEventListener('click', heal);
+    resetBtn.addEventListener('click', resetAll);
+    dmgEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyDamage(); }
+    });
+
+    load();
+  }
+
+  const mount = document.getElementById('trackers');
+  for (let i = 0; i < COUNT; i++) {
+    const card = document.createElement('section');
+    makeTracker(card, i);
+    mount.appendChild(card);
+  }
+
+  // Focus first tracker damage field
+  const firstDmg = mount.querySelector('.tracker [data-role="dmg"]');
+  if (firstDmg) firstDmg.focus();
+})();
+</script>
+</body>
+</html>
